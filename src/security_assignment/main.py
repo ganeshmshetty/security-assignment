@@ -2,204 +2,380 @@ import asyncio
 import json
 import os
 import argparse
-from typing import List, Any
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from google.antigravity import Agent, LocalAgentConfig
 from google.antigravity.hooks import policy
 
-# Load environment variables from a .env file if it exists
 load_dotenv()
 
-# Import custom tools and agent prompts
 from security_assignment.tools.scanners import (
     run_semgrep_sast,
     detect_secrets_gitleaks,
-    scan_dependencies_trivy
+    scan_dependencies_trivy,
 )
 from security_assignment.agents.prompts import (
     RECON_INSTRUCTIONS,
     SAST_INSTRUCTIONS,
     DEPENDENCY_INSTRUCTIONS,
     VERIFICATION_INSTRUCTIONS,
-    REPORTING_INSTRUCTIONS
+    REPORTING_INSTRUCTIONS,
+    AUTH_SECURITY_INSTRUCTIONS,
+    SQL_INJECTION_INSTRUCTIONS,
+    PAYMENT_SECURITY_INSTRUCTIONS,
+    FILE_UPLOAD_INSTRUCTIONS,
+    SSRF_INSTRUCTIONS,
+    PLANNER_INSTRUCTIONS,
 )
 
-# Common configuration settings
+# ─── Configuration ────────────────────────────────────────────────────────────
 PROJECT_ID = "causal-hour-494002-e9"
-LOCATION = "global"  # Gemini Enterprise Agent Platform uses global location
-MODEL_NAME = "gemini-3.5-flash"  # Default thinking model
+LOCATION   = "global"
+MODEL_NAME = "gemini-3.5-flash"
 
-# ----------------------------------------------------
-# Pydantic Schemas for Structured Agent Outputs
-# ----------------------------------------------------
+# ─── Tool Registry (all tools the dynamic agents can request) ─────────────────
+TOOL_REGISTRY = {
+    "run_semgrep_sast":       run_semgrep_sast,
+    "detect_secrets_gitleaks": detect_secrets_gitleaks,
+    "scan_dependencies_trivy": scan_dependencies_trivy,
+}
+
+# ─── Predefined Specialized Agent Registry ────────────────────────────────────
+# These are expert agents with hand-crafted prompts.
+# The Planner can select any of these by name.
+PREDEFINED_AGENT_REGISTRY = {
+    "auth":          AUTH_SECURITY_INSTRUCTIONS,
+    "sql_injection": SQL_INJECTION_INSTRUCTIONS,
+    "payment":       PAYMENT_SECURITY_INSTRUCTIONS,
+    "file_upload":   FILE_UPLOAD_INSTRUCTIONS,
+    "ssrf":          SSRF_INSTRUCTIONS,
+}
+
+# Human-readable descriptions sent to the Planner so it knows what's available
+PREDEFINED_AGENT_DESCRIPTIONS = {
+    "auth":          "Authentication & Authorization — JWT, session fixation, IDOR, missing auth middleware",
+    "sql_injection": "SQL Injection Specialist — tautologies, blind SQLi, second-order, ORM escape bypasses",
+    "payment":       "Payment Security — webhook signature validation, double-spend, amount tampering, IDOR on orders",
+    "file_upload":   "File Upload Security — path traversal, MIME bypass, zip slip, malicious file execution",
+    "ssrf":          "SSRF Specialist — user-controlled URLs, internal metadata endpoints, protocol smuggling",
+}
+
+
+# ─── Pydantic Schemas ─────────────────────────────────────────────────────────
+
+class StackProfile(BaseModel):
+    """Output schema for the Recon Agent."""
+    languages:         List[str]     = Field(description="Programming languages detected")
+    frameworks:        List[str]     = Field(description="Frameworks / libraries detected")
+    has_database:      bool          = Field(description="True if the code connects to any SQL or NoSQL database")
+    db_type:           Optional[str] = Field(description="Type of database (e.g. 'sqlite', 'postgresql', 'mongodb')")
+    has_payment_api:   bool          = Field(description="True if the code integrates with a payment provider")
+    payment_providers: List[str]     = Field(description="Payment providers detected", default=[])
+    has_file_uploads:  bool          = Field(description="True if the code handles file uploads")
+    has_auth:          bool          = Field(description="True if the code has authentication / session logic")
+    has_external_http: bool          = Field(description="True if the code makes external HTTP requests with user-controlled URLs")
+    entry_files:       List[str]     = Field(description="Main entry point files")
+    notable_surfaces:  List[str]     = Field(description="Any other notable security surfaces not covered above (e.g. 'graphql', 'websocket', 'xml_parsing', 'crypto_implementation', 'redis_caching')", default=[])
 
 class VulnerabilityFinding(BaseModel):
-    title: str = Field(description="Title of the hypothesized vulnerability")
-    description: str = Field(description="Detailed explanation of the vulnerability and data flow path")
-    severity: str = Field(description="Severity (e.g. CRITICAL, HIGH, MEDIUM, LOW)")
-    cwe_id: int = Field(description="CWE ID mapping (integer)")
-    file: str = Field(description="Target file name")
-    line_start: int = Field(description="Starting line number")
-    line_end: int = Field(description="Ending line number")
+    title:       str = Field(description="Short title of the vulnerability")
+    description: str = Field(description="Detailed explanation including the data flow from source to sink")
+    severity:    str = Field(description="Severity level: CRITICAL, HIGH, MEDIUM, or LOW")
+    cwe_id:      int = Field(description="CWE ID number (integer only)")
+    file:        str = Field(description="Name of the affected file")
+    line_start:  int = Field(description="Starting line number")
+    line_end:    int = Field(description="Ending line number")
 
 class SASTFindings(BaseModel):
     vulnerabilities: List[VulnerabilityFinding]
 
+class DynamicAgentSpec(BaseModel):
+    """A brand-new agent spec generated by the Planner for novel security surfaces."""
+    name:                str       = Field(description="Short display name for this agent (e.g. 'GraphQL Injection Auditor')")
+    focus:               str       = Field(description="One-line description of what this agent checks")
+    system_instructions: str       = Field(description="Full system prompt for this agent — detailed, specific instructions for the security review it should conduct")
+    tools_needed:        List[str] = Field(description="Names of tools from the tool registry to give this agent. Valid values: run_semgrep_sast, detect_secrets_gitleaks, scan_dependencies_trivy")
+    trigger_reason:      str       = Field(description="Why the orchestrator created this agent — what it detected in the StackProfile that warranted it")
+
+class ExecutionPlan(BaseModel):
+    """The Planner's output — which agents to run and any new ones to create."""
+    predefined_agents: List[str]           = Field(description="Names of predefined specialized agents to activate from the registry")
+    dynamic_agents:    List[DynamicAgentSpec] = Field(description="New agents to create on the fly for novel surfaces not covered by any predefined agent")
+    rationale:         str                 = Field(description="Brief explanation of the overall plan")
+
 class VerificationResult(BaseModel):
-    verified: bool = Field(description="Whether the vulnerability was verified as a true positive")
-    poc_code: str = Field(description="Regression test code payload proving the vulnerability")
+    verified: bool = Field(description="True if the vulnerability is a confirmed true positive")
+    poc_code: str  = Field(description="Full regression test code proving the vulnerability")
 
 
-async def run_agent_phase_text(config: LocalAgentConfig, prompt: str) -> str:
-    """
-    Executes an agent session and returns the raw conversational text response.
-    """
+# ─── Agent Factory ────────────────────────────────────────────────────────────
+
+def build_agent_config(instructions: str, tools: list = [], schema=None) -> LocalAgentConfig:
+    return LocalAgentConfig(
+        project=PROJECT_ID,
+        location=LOCATION,
+        vertex=True,
+        model=MODEL_NAME,
+        system_instructions=instructions,
+        tools=tools if tools else [],
+        policies=[policy.allow_all()],
+        response_schema=schema,
+    )
+
+
+# ─── Agent Runner Helpers ─────────────────────────────────────────────────────
+
+async def run_text(config: LocalAgentConfig, prompt: str) -> str:
     async with Agent(config) as agent:
         res = await agent.chat(prompt)
         return await res.text()
 
-async def run_agent_phase_structured(config: LocalAgentConfig, prompt: str) -> Any:
-    """
-    Executes an agent session and returns the structured output (dict)
-    enforced by the configuration's response_schema.
-    """
+async def run_structured(config: LocalAgentConfig, prompt: str) -> Any:
     async with Agent(config) as agent:
         res = await agent.chat(prompt)
         return await res.structured_output()
 
-async def run_security_pipeline(repo_path: str):
-    print(f"[*] Starting Orchestrated AI Security Review on: {repo_path}")
 
-    # Ensure the path is absolute
-    abs_repo_path = os.path.abspath(repo_path)
+# ─── Individual Agent Coroutines ──────────────────────────────────────────────
 
-    # ----------------------------------------------------
-    # Step 1: Reconnaissance Phase
-    # ----------------------------------------------------
-    print("[+] Starting Reconnaissance Phase...")
-    recon_config = LocalAgentConfig(
-        project=PROJECT_ID,
-        location=LOCATION,
-        vertex=True,
-        model=MODEL_NAME,
-        system_instructions=RECON_INSTRUCTIONS,
-        tools=[run_semgrep_sast],
-        policies=[policy.allow_all()]
-    )
-    
-    recon_prompt = f"Analyze the repository structure of '{abs_repo_path}'. Provide a brief summary of the architecture and entrypoints."
-    recon_text = await run_agent_phase_text(recon_config, recon_prompt)
-    print(f"    - Recon completed. Summary length: {len(recon_text)} characters.")
-    
-    # ----------------------------------------------------
-    # Step 2: SAST & Secrets Phase
-    # ----------------------------------------------------
-    print("[+] Starting Static Analysis & Secrets Scanning Phase...")
-    sast_config = LocalAgentConfig(
-        project=PROJECT_ID,
-        location=LOCATION,
-        vertex=True,
-        model=MODEL_NAME,
-        system_instructions=SAST_INSTRUCTIONS,
+async def run_sast_agent(repo_path: str) -> List[dict]:
+    config = build_agent_config(
+        SAST_INSTRUCTIONS,
         tools=[run_semgrep_sast, detect_secrets_gitleaks],
-        policies=[policy.allow_all()],
-        response_schema=SASTFindings  # Enforce structured output via Pydantic model
+        schema=SASTFindings,
     )
-    
-    sast_prompt = f"Review the codebase: '{abs_repo_path}'. Call your tools 'run_semgrep_sast' and 'detect_secrets_gitleaks' on '{abs_repo_path}'. Return the structured vulnerabilities findings list."
-    findings = await run_agent_phase_structured(sast_config, sast_prompt)
-    print(f"    - SAST Analysis completed.")
-    
-    # Format findings list from dictionary
-    findings_list = []
-    if findings and isinstance(findings, dict) and "vulnerabilities" in findings:
-        for v in findings["vulnerabilities"]:
-            if isinstance(v, dict):
-                findings_list.append({
-                    "title": v.get("title", "Unknown"),
-                    "description": v.get("description", ""),
-                    "severity": v.get("severity", "MEDIUM"),
-                    "cwe_id": v.get("cwe_id", 0),
-                    "file": v.get("file", ""),
-                    "line_start": v.get("line_start", 0),
-                    "line_end": v.get("line_end", 0)
-                })
-
-    # ----------------------------------------------------
-    # Step 3: Dependency Analysis Phase
-    # ----------------------------------------------------
-    print("[+] Starting Dependency Analysis Phase...")
-    dep_config = LocalAgentConfig(
-        project=PROJECT_ID,
-        location=LOCATION,
-        vertex=True,
-        model=MODEL_NAME,
-        system_instructions=DEPENDENCY_INSTRUCTIONS,
-        tools=[scan_dependencies_trivy],
-        policies=[policy.allow_all()]
+    prompt = (
+        f"Review the codebase at '{repo_path}'. "
+        f"Call run_semgrep_sast and detect_secrets_gitleaks on '{repo_path}'. "
+        f"Return all findings as SASTFindings."
     )
-    
-    dep_prompt = f"Audit dependency security for the workspace: '{abs_repo_path}'. Call 'scan_dependencies_trivy' on '{abs_repo_path}' and summarize."
-    dep_text = await run_agent_phase_text(dep_config, dep_prompt)
-    print(f"    - Dependency Scan completed.")
+    result = await run_structured(config, prompt)
+    if result and isinstance(result, dict) and "vulnerabilities" in result:
+        return [dict(v) for v in result["vulnerabilities"]]
+    return []
 
-    # ----------------------------------------------------
-    # Step 4: Verification Phase (DAST/Sandbox)
-    # ----------------------------------------------------
-    print("[+] Starting Verification Phase...")
-    verified_findings = []
-    
-    verifier_config = LocalAgentConfig(
-        project=PROJECT_ID,
-        location=LOCATION,
-        vertex=True,
-        model=MODEL_NAME,
-        system_instructions=VERIFICATION_INSTRUCTIONS,
-        policies=[policy.allow_all()],
-        response_schema=VerificationResult  # Enforce verification results schema
+async def run_dependency_agent(repo_path: str) -> str:
+    config = build_agent_config(DEPENDENCY_INSTRUCTIONS, tools=[scan_dependencies_trivy])
+    return await run_text(
+        config,
+        f"Audit dependency security for '{repo_path}'. Call scan_dependencies_trivy on '{repo_path}' and provide a full markdown summary."
     )
 
-    for finding in findings_list:
-        finding_str = json.dumps(finding)
-        print(f"    - Verifying finding: {finding.get('title', 'Unknown')}")
-        verification_prompt = f"Analyze this finding and generate a regression test payload for it: {finding_str}. Return the structured verification output."
-        
-        verification_data = await run_agent_phase_structured(verifier_config, verification_prompt)
-        
-        if verification_data and isinstance(verification_data, dict) and verification_data.get("verified") == True:
-            finding["poc_test_code"] = verification_data.get("poc_code", "")
-            finding["status"] = "VERIFIED"
-            verified_findings.append(finding)
-        else:
-            finding["status"] = "UNVERIFIED (False Positive Rejected)"
-
-    # ----------------------------------------------------
-    # Step 5: Reporting Phase
-    # ----------------------------------------------------
-    print("[+] Starting Reporting Phase...")
-    report_config = LocalAgentConfig(
-        project=PROJECT_ID,
-        location=LOCATION,
-        vertex=True,
-        model=MODEL_NAME,
-        system_instructions=REPORTING_INSTRUCTIONS,
-        policies=[policy.allow_all()]
+async def run_specialized_agent(agent_name: str, instructions: str, repo_path: str) -> List[dict]:
+    """Runs a predefined specialized agent."""
+    config = build_agent_config(instructions, tools=[run_semgrep_sast], schema=SASTFindings)
+    result = await run_structured(
+        config,
+        f"Perform a targeted '{agent_name}' security review on '{repo_path}'. Return SASTFindings."
     )
-    
-    report_text = await run_agent_phase_text(report_config, f"Consolidate these verified vulnerabilities: {json.dumps(verified_findings)} and dependency issues: {dep_text} into a Markdown report.")
+    if result and isinstance(result, dict) and "vulnerabilities" in result:
+        return [dict(v) for v in result["vulnerabilities"]]
+    return []
+
+async def run_dynamic_agent(spec: dict, repo_path: str) -> List[dict]:
+    """Instantiates and runs a brand-new agent generated by the Planner."""
+    tools = [TOOL_REGISTRY[t] for t in spec.get("tools_needed", []) if t in TOOL_REGISTRY]
+    config = build_agent_config(spec["system_instructions"], tools=tools, schema=SASTFindings)
+    result = await run_structured(
+        config,
+        f"Perform your security review on the codebase at '{repo_path}'. Return SASTFindings."
+    )
+    if result and isinstance(result, dict) and "vulnerabilities" in result:
+        return [dict(v) for v in result["vulnerabilities"]]
+    return []
+
+async def run_verification_agent(finding: dict) -> Optional[dict]:
+    config = build_agent_config(VERIFICATION_INSTRUCTIONS, schema=VerificationResult)
+    result = await run_structured(
+        config,
+        f"Verify this security finding and write a PoC test if confirmed:\n{json.dumps(finding, indent=2)}"
+    )
+    if result and isinstance(result, dict) and result.get("verified") is True:
+        finding["poc_test_code"] = result.get("poc_code", "")
+        finding["status"] = "VERIFIED"
+        return finding
+    finding["status"] = "UNVERIFIED (False Positive Rejected)"
+    return None
+
+
+# ─── Main Pipeline ────────────────────────────────────────────────────────────
+
+async def run_security_pipeline(repo_path: str, force_agents: Optional[List[str]] = None):
+    abs_repo_path = os.path.abspath(repo_path)
+    print(f"\n{'='*60}")
+    print(f"  AI Security Review — {abs_repo_path}")
+    print(f"{'='*60}\n")
+
+    # ── Phase 1: Recon / Stack Profiling ──────────────────────────────────────
+    print("[1/5] Reconnaissance & Stack Profiling...")
+    profile_raw = await run_structured(
+        build_agent_config(RECON_INSTRUCTIONS, tools=[run_semgrep_sast], schema=StackProfile),
+        f"Analyze the repository at '{abs_repo_path}'. Walk its files and produce the StackProfile JSON."
+    )
+    profile: dict = profile_raw if isinstance(profile_raw, dict) else {}
+
+    print(f"    Languages  : {profile.get('languages', [])}")
+    print(f"    Frameworks : {profile.get('frameworks', [])}")
+    print(f"    Entry Files: {profile.get('entry_files', [])}")
+    print(f"    Surfaces   : db={profile.get('has_database')} auth={profile.get('has_auth')} "
+          f"payment={profile.get('has_payment_api')} uploads={profile.get('has_file_uploads')} "
+          f"http={profile.get('has_external_http')}")
+    if profile.get("notable_surfaces"):
+        print(f"    Notable    : {profile.get('notable_surfaces')}")
+
+    # ── Phase 2: Dynamic Planning (LLM decides) ───────────────────────────────
+    print("\n[2/5] Planning agent execution...")
+
+    if force_agents:
+        # Manual override: treat all as predefined agent names
+        plan = {"predefined_agents": force_agents, "dynamic_agents": [], "rationale": "Manual override via --agents flag"}
+        print(f"    [!] Manual override — agents: {force_agents}")
+    else:
+        # Let the Planner LLM generate the execution plan
+        registry_desc = json.dumps(PREDEFINED_AGENT_DESCRIPTIONS, indent=2)
+        tool_desc = json.dumps(list(TOOL_REGISTRY.keys()), indent=2)
+
+        plan_raw = await run_structured(
+            build_agent_config(PLANNER_INSTRUCTIONS, schema=ExecutionPlan),
+            f"""You are planning a security audit. Here is the codebase profile:
+
+{json.dumps(profile, indent=2)}
+
+Available predefined specialized agents (select by name):
+{registry_desc}
+
+Available tools for new dynamic agents:
+{tool_desc}
+
+Decide which predefined agents to run and if there are any novel security surfaces
+not covered by the predefined registry, create new dynamic agent specs for them.
+"""
+        )
+        plan: dict = plan_raw if isinstance(plan_raw, dict) else {"predefined_agents": [], "dynamic_agents": []}
+        print(f"    Rationale  : {plan.get('rationale', 'N/A')}")
+        print(f"    Predefined : {plan.get('predefined_agents', [])}")
+
+        dynamic_specs = plan.get("dynamic_agents", [])
+        if dynamic_specs:
+            print(f"    Dynamic    : {[s.get('name') if isinstance(s, dict) else s for s in dynamic_specs]}")
+            for spec in dynamic_specs:
+                if isinstance(spec, dict):
+                    print(f"      → '{spec.get('name')}': {spec.get('trigger_reason', '')}")
+
+    # ── Phase 3: Parallel Agent Execution ─────────────────────────────────────
+    selected_predefined = plan.get("predefined_agents", [])
+    dynamic_specs       = plan.get("dynamic_agents", [])
+
+    total_agents = 2 + len(selected_predefined) + len(dynamic_specs)  # 2 = always-run
+    print(f"\n[3/5] Running {total_agents} agents in parallel (2 core + {len(selected_predefined)} predefined + {len(dynamic_specs)} dynamic)...")
+
+    async def dispatch_predefined(name: str):
+        if name not in PREDEFINED_AGENT_REGISTRY:
+            print(f"    [!] Unknown predefined agent '{name}' — skipping")
+            return (name, [])
+        print(f"    -> Launching predefined: {name}")
+        findings = await run_specialized_agent(name, PREDEFINED_AGENT_REGISTRY[name], abs_repo_path)
+        return (name, findings)
+
+    async def dispatch_dynamic(spec):
+        spec_dict = dict(spec) if not isinstance(spec, dict) else spec
+        name = spec_dict.get("name", "unknown")
+        print(f"    -> Launching dynamic agent: '{name}'")
+        findings = await run_dynamic_agent(spec_dict, abs_repo_path)
+        return (f"dynamic:{name}", findings)
+
+    # Always-run agents + all selected/dynamic agents in parallel
+    tasks = [
+        run_sast_agent(abs_repo_path),
+        run_dependency_agent(abs_repo_path),
+        *[dispatch_predefined(name) for name in selected_predefined],
+        *[dispatch_dynamic(spec) for spec in dynamic_specs],
+    ]
+
+    results = await asyncio.gather(*tasks)
+
+    # Unpack results — first two are always sast and dependency
+    sast_findings   = results[0] if isinstance(results[0], list) else []
+    dep_text        = results[1] if isinstance(results[1], str) else ""
+    rest            = results[2:]
+
+    all_findings: List[dict] = []
+    for f in sast_findings:
+        f["source_agent"] = "sast"
+        all_findings.append(f)
+
+    for item in rest:
+        if isinstance(item, tuple):
+            agent_name, findings = item
+            print(f"    [✓] {agent_name}: {len(findings) if isinstance(findings, list) else 0} finding(s)")
+            if isinstance(findings, list):
+                for f in findings:
+                    f["source_agent"] = agent_name
+                all_findings.extend(findings)
+        elif isinstance(item, list):
+            all_findings.extend(item)
+
+    print(f"    [✓] sast: {len(sast_findings)} finding(s)")
+    print(f"    [✓] dependency: scan complete")
+    print(f"    Total raw findings: {len(all_findings)}")
+
+    # ── Phase 4: Verification (parallel per finding) ─────────────────────────
+    print(f"\n[4/5] Verifying {len(all_findings)} finding(s)...")
+    verification_results = await asyncio.gather(*[run_verification_agent(f) for f in all_findings])
+    verified_findings = [f for f in verification_results if f is not None]
+    print(f"    Verified: {len(verified_findings)} / {len(all_findings)} confirmed")
+
+    # ── Phase 5: Reporting ────────────────────────────────────────────────────
+    print("\n[5/5] Generating Security Report...")
+    report_config = build_agent_config(REPORTING_INSTRUCTIONS)
+    report_text = await run_text(
+        report_config,
+        f"Generate a comprehensive Security Audit Report.\n\n"
+        f"Stack Profile:\n{json.dumps(profile, indent=2)}\n\n"
+        f"Agents Run: {total_agents} total ({len(dynamic_specs)} dynamically created)\n\n"
+        f"Verified Code Vulnerabilities:\n{json.dumps(verified_findings, indent=2)}\n\n"
+        f"Dependency Audit Summary:\n{dep_text}"
+    )
 
     output_path = os.path.join(abs_repo_path, "SECURITY_ASSIGNMENT_REPORT.md")
     with open(output_path, "w") as f:
         f.write(report_text)
-    print(f"[*] Security Review Complete. Report saved to: {output_path}")
+
+    print(f"\n{'='*60}")
+    print(f"  ✅  Security Review Complete!")
+    print(f"  Report       : {output_path}")
+    print(f"  Verified     : {len(verified_findings)} vulnerabilities")
+    print(f"  Agents run   : {total_agents} ({len(dynamic_specs)} created on the fly)")
+    print(f"{'='*60}\n")
+
+
+# ─── CLI ──────────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Orchestrated AI Security Reviewer (SecurityAssignment)")
+    parser = argparse.ArgumentParser(
+        description="AI Security Review — Dynamic Multi-Agent Orchestrator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Auto-detect everything (recommended):
+  uv run python -m security_assignment.main ./my-app
+
+  # Manual override — force specific agents:
+  uv run python -m security_assignment.main ./my-app --agents sast,auth,dependency
+
+Available predefined agents: auth, sql_injection, payment, file_upload, ssrf
+        """
+    )
     parser.add_argument("path", help="Path to the repository to scan")
+    parser.add_argument(
+        "--agents",
+        help="Comma-separated list of predefined agent names to force-run (skips auto-planning)",
+        default=None
+    )
     args = parser.parse_args()
-    
-    asyncio.run(run_security_pipeline(args.path))
+    force_agents = [a.strip() for a in args.agents.split(",")] if args.agents else None
+    asyncio.run(run_security_pipeline(args.path, force_agents))
 
 if __name__ == "__main__":
     main()

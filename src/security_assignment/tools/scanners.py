@@ -4,37 +4,27 @@ import subprocess
 import shutil
 import os
 
-def resolve_file_path(workspace_path: str, relative_path: str) -> str:
-    """
-    Resolves the file path dynamically. If the workspace_path already ends with the 
-    parent folder of the relative_path, it prevents path doubling.
-    """
-    workspace_path = os.path.abspath(workspace_path)
-    parts = relative_path.strip("/").split("/")
-    first_folder = parts[0]
-    
-    if os.path.basename(workspace_path) == first_folder:
-        return os.path.join(workspace_path, *parts[1:])
-    return os.path.join(workspace_path, relative_path)
 
 async def run_semgrep_sast(workspace_path: str) -> str:
-    """Executes a Semgrep scan on the target workspace directory."""
-    target_file = resolve_file_path(workspace_path, "sample_target/app.js")
-    
+    """
+    Executes a Semgrep SAST scan on the target workspace directory.
+    Returns findings as a JSON string. Falls back to mock data if Semgrep is not installed.
+    """
     if not shutil.which("semgrep"):
-        # Fallback for demonstration if semgrep is not installed on the system
+        # Fallback mock when semgrep is not installed
         return json.dumps({
             "results": [
                 {
                     "check_id": "javascript.express.security.injection.tainted-sql-string",
-                    "path": target_file,
+                    "path": os.path.join(workspace_path, "app.js"),
                     "start": {"line": 18},
                     "extra": {
-                        "message": "Detected string concatenation with SQL query. Potential SQL injection.",
+                        "message": "Detected string concatenation with a user-supplied value into an SQL query. This is a potential SQL injection vulnerability.",
                         "severity": "ERROR"
                     }
                 }
-            ]
+            ],
+            "errors": []
         })
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -42,23 +32,24 @@ async def run_semgrep_sast(workspace_path: str) -> str:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        return stdout.decode().strip()
+        return stdout.decode().strip() or json.dumps({"results": [], "errors": []})
     except Exception as e:
-        return json.dumps({"error": f"Failed to run Semgrep: {str(e)}"})
+        return json.dumps({"error": f"Failed to run Semgrep: {str(e)}", "results": []})
 
 
 async def detect_secrets_gitleaks(workspace_path: str) -> str:
-    """Scans the repository for hardcoded secrets and api keys using GitLeaks."""
-    target_file = resolve_file_path(workspace_path, "sample_target/app.js")
-    
+    """
+    Scans the repository for hardcoded secrets and API keys using Gitleaks.
+    Returns findings as a JSON string. Falls back to mock data if Gitleaks is not installed.
+    """
     if not shutil.which("gitleaks"):
-        # Fallback mock for assignment demo
+        # Fallback mock when gitleaks is not installed
         return json.dumps([
             {
                 "Description": "Stripe Secret Key",
                 "StartLine": 29,
                 "EndLine": 29,
-                "File": target_file,
+                "File": os.path.join(workspace_path, "app.js"),
                 "Match": "STRIPE_SECRET_KEY_PLACEHOLDER_NOT_A_REAL_KEY",
                 "Secret": "STRIPE_SECRET_KEY_PLACEHOLDER_NOT_A_REAL_KEY",
                 "RuleID": "stripe-secret-key"
@@ -66,25 +57,29 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
         ])
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gitleaks", "detect", "--source", workspace_path, "--report-format", "json",
+            "gitleaks", "detect", "--source", workspace_path,
+            "--report-format", "json", "--no-git",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        return stdout.decode().strip()
+        raw = stdout.decode().strip()
+        # Gitleaks exits non-zero when it finds secrets; we still want the output
+        return raw if raw else json.dumps([])
     except Exception as e:
-        return json.dumps({"error": f"Failed to run GitLeaks: {str(e)}"})
+        return json.dumps({"error": f"Failed to run Gitleaks: {str(e)}"})
 
 
 async def scan_dependencies_trivy(workspace_path: str) -> str:
-    """Audits codebase package files using Trivy."""
-    target_file = resolve_file_path(workspace_path, "sample_target/package.json")
-    
+    """
+    Audits codebase package manifests using Trivy for known CVEs.
+    Returns findings as a JSON string. Falls back to mock data if Trivy is not installed.
+    """
     if not shutil.which("trivy"):
-        # Fallback mock for assignment demo
+        # Fallback mock when trivy is not installed
         return json.dumps({
             "Results": [
                 {
-                    "Target": target_file,
+                    "Target": os.path.join(workspace_path, "package.json"),
                     "Class": "lang-pkgs",
                     "Type": "npm",
                     "Vulnerabilities": [
@@ -106,6 +101,6 @@ async def scan_dependencies_trivy(workspace_path: str) -> str:
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
-        return stdout.decode().strip()
+        return stdout.decode().strip() or json.dumps({"Results": []})
     except Exception as e:
-        return json.dumps({"error": f"Failed to run Trivy: {str(e)}"})
+        return json.dumps({"error": f"Failed to run Trivy: {str(e)}", "Results": []})
