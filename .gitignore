@@ -17,4 +17,9 @@ wheels/
 .DS_Store
 
 # Node packages
-node_modules/
+**/node_modules/
+package-lock.json
+
+# Security Reports & Temp JSON Outputs
+*report.json
+*REPORT.md
