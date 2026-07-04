@@ -31,7 +31,7 @@ from security_assignment.tools.scanners import run_semgrep_sast
 # Page configuration
 st.set_page_config(
     page_title="AI Security Reviewer",
-    page_icon="🛡️",
+    
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -52,10 +52,10 @@ code, pre {
 
 /* Header style banner */
 .header-banner {
-    background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
+    background: #0f172a;
     padding: 2.5rem;
-    border-radius: 16px;
-    border: 1px solid #312e81;
+    border-radius: 8px;
+    border: 1px solid #1e293b;
     margin-bottom: 2rem;
     box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
 }
@@ -82,7 +82,7 @@ code, pre {
     padding: 0.25rem 0.75rem;
     font-size: 0.8rem;
     font-weight: 700;
-    border-radius: 50px;
+    border-radius: 4px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     text-align: center;
@@ -140,7 +140,7 @@ code, pre {
 # Main Banner UI
 st.markdown("""
 <div class="header-banner">
-    <h1>🛡️ Orchestrated AI Security Reviewer</h1>
+    <h1>Orchestrated AI Security Reviewer</h1>
     <p>Autonomous dynamic multi-agent security assessment engine built on google-antigravity.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -171,10 +171,10 @@ def reset_scan():
     st.session_state.final_report = ""
 
 # Sidebar controls
-st.sidebar.header("🎯 Scanning Targets")
+st.sidebar.header("Scanning Targets")
 target_path = st.sidebar.text_input("Workspace Path", value="./sample_target", help="Path to the directory containing code to scan.")
 
-st.sidebar.subheader("⚙️ Configuration")
+st.sidebar.subheader("Configuration")
 mode = st.sidebar.radio("Orchestration Mode", ["Auto-Plan (Dynamic Orchestration)", "Manual Agent Selection"])
 
 force_agents = None
@@ -188,9 +188,9 @@ if mode == "Manual Agent Selection":
     )
 
 st.sidebar.divider()
-start_btn = st.sidebar.button("🚀 Start Security Audit", use_container_width=True, type="primary")
+start_btn = st.sidebar.button("Start Security Audit", use_container_width=True, type="primary")
 
-if st.sidebar.button("🧹 Clear Results", use_container_width=True):
+if st.sidebar.button("Clear Results", use_container_width=True):
     reset_scan()
     st.success("Results cleared!")
     st.rerun()
@@ -273,7 +273,7 @@ not covered by the predefined registry, create new dynamic agent specs for them.
 
         # 3.1: Core SAST
         if run_core_sast:
-            progress_status.write(f"  [{agent_idx}/{total_agents}] 🔍 Running Core SAST Agent...")
+            progress_status.write(f"  [{agent_idx}/{total_agents}] Running Core SAST Agent...")
             try:
                 sast_findings = await run_sast_agent(abs_repo_path)
                 progress_status.write(f"  ✓ Core SAST Agent finished. Identified {len(sast_findings)} potential vulnerability pattern(s).")
@@ -286,7 +286,7 @@ not covered by the predefined registry, create new dynamic agent specs for them.
 
         # 3.2: Core Dependency Scanner
         if run_core_dep:
-            progress_status.write(f"  [{agent_idx}/{total_agents}] 📦 Running Core Dependency Auditor (Trivy)...")
+            progress_status.write(f"  [{agent_idx}/{total_agents}] Running Core Dependency Auditor (Trivy)...")
             try:
                 dep_text = await run_dependency_agent(abs_repo_path)
                 st.session_state.dependency_report = dep_text
@@ -297,7 +297,7 @@ not covered by the predefined registry, create new dynamic agent specs for them.
 
         # 3.3: Predefined Agents
         for p_name in selected_predefined:
-            progress_status.write(f"  [{agent_idx}/{total_agents}] 🤖 Running Predefined Expert: '{p_name}' Agent...")
+            progress_status.write(f"  [{agent_idx}/{total_agents}] Running Predefined Expert: '{p_name}' Agent...")
             if p_name in PREDEFINED_AGENT_REGISTRY:
                 try:
                     findings = await run_specialized_agent(p_name, PREDEFINED_AGENT_REGISTRY[p_name], abs_repo_path)
@@ -308,14 +308,14 @@ not covered by the predefined registry, create new dynamic agent specs for them.
                 except Exception as ex:
                     progress_status.write(f"  ❌ Predefined '{p_name}' Agent failed: {str(ex)}")
             else:
-                progress_status.write(f"  ⚠️ Warning: Agent '{p_name}' not registered.")
+                progress_status.write(f"  Warning: Agent '{p_name}' not registered.")
             agent_idx += 1
 
         # 3.4: Dynamic Agents
         for d_spec in dynamic_specs:
             spec_dict = dict(d_spec) if not isinstance(d_spec, dict) else d_spec
             name = spec_dict.get("name", "unknown")
-            progress_status.write(f"  [{agent_idx}/{total_agents}] ✨ Running Custom Dynamic Agent: '{name}'...")
+            progress_status.write(f"  [{agent_idx}/{total_agents}] Running Custom Dynamic Agent: '{name}'...")
             try:
                 findings = await run_dynamic_agent(spec_dict, abs_repo_path)
                 progress_status.write(f"  ✓ Dynamic Agent '{name}' finished. Found {len(findings)} vulnerability candidate(s).")
@@ -336,25 +336,25 @@ not covered by the predefined registry, create new dynamic agent specs for them.
         for i, finding in enumerate(all_findings):
             v_title = finding.get('title', 'Untitled')
             v_file = finding.get('file', 'Unknown')
-            progress_status.write(f"  [{i+1}/{len(all_findings)}] 🧪 Verifying '{v_title}' in {os.path.basename(v_file)}...")
+            progress_status.write(f"  [{i+1}/{len(all_findings)}] Verifying '{v_title}' in {os.path.basename(v_file)}...")
             try:
                 if i > 0:
                     await asyncio.sleep(3.0)  # Rate pacing
                 res = await run_verification_agent(finding)
                 if res is not None:
-                    progress_status.write(f"    ✅ CONFIRMED: '{v_title}' is a true positive. Generated regression PoC.")
+                    progress_status.write(f"    CONFIRMED: '{v_title}' is a true positive. Generated regression PoC.")
                     verified_findings.append(res)
                 else:
-                    progress_status.write(f"    ❌ REJECTED: '{v_title}' identified as false positive.")
+                    progress_status.write(f"    REJECTED: '{v_title}' identified as false positive.")
             except Exception as ex:
-                progress_status.write(f"    ⚠️ Verification error for '{v_title}': {str(ex)}")
+                progress_status.write(f"    Verification error for '{v_title}': {str(ex)}")
                 
         st.session_state.verified_findings = verified_findings
         progress_status.write(f"✓ Verification phase complete. Confirmed {len(verified_findings)} true positives / {len(all_findings)} raw findings.")
 
         # Phase 5: Reporting
         progress_status.update(label="[5/5] Phase 5: Compiling final Security Report...", state="running")
-        progress_status.write("  📄 Synthesizing overall markdown security audit report...")
+        progress_status.write("  Synthesizing overall markdown security audit report...")
         report_config = build_agent_config(REPORTING_INSTRUCTIONS)
         report_text = await run_text(
             report_config,
@@ -367,15 +367,15 @@ not covered by the predefined registry, create new dynamic agent specs for them.
         st.session_state.final_report = report_text
         
         output_path = os.path.join(abs_repo_path, "SECURITY_ASSIGNMENT_REPORT.md")
-        progress_status.write(f"  💾 Writing final report to: {output_path}")
+        progress_status.write(f"  Writing final report to: {output_path}")
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(report_text)
             
-        progress_status.update(label="🎉 Security Scan Finished Successfully!", state="complete")
+        progress_status.update(label="Security Scan Finished Successfully", state="complete")
         st.session_state.scan_completed = True
         
     except Exception as e:
-        progress_status.update(label="❌ Pipeline Execution Failed!", state="error")
+        progress_status.update(label="Pipeline Execution Failed", state="error")
         st.error(f"Error executing security pipeline: {str(e)}")
         import traceback
         st.code(traceback.format_exc())
@@ -390,11 +390,11 @@ if st.session_state.scan_completed:
     
     # Main Tabs
     tab_overview, tab_planner, tab_vulns, tab_deps, tab_report = st.tabs([
-        "📊 Scan Overview", 
-        "🧠 Orchestration & Planner", 
-        "🔓 Verified Vulnerabilities", 
-        "📦 Dependency Audit", 
-        "📄 Complete Audit Report"
+        "Scan Overview", 
+        "Orchestration & Planner", 
+        "Verified Vulnerabilities", 
+        "Dependency Audit", 
+        "Complete Audit Report"
     ])
     
     with tab_overview:
@@ -421,7 +421,7 @@ if st.session_state.scan_completed:
         col_left, col_right = st.columns(2)
         
         with col_left:
-            st.write("#### 💻 Technical Stack")
+            st.write("#### Technical Stack")
             st.write(f"**Primary Languages:** {', '.join(profile.get('languages', []))}")
             st.write(f"**Frameworks/Libraries:** {', '.join(profile.get('frameworks', []))}")
             st.write(f"**Main Entry Point Files:**")
@@ -429,20 +429,20 @@ if st.session_state.scan_completed:
                 st.code(entry)
                 
         with col_right:
-            st.write("#### 🛡️ Detected Security Surfaces")
+            st.write("#### Detected Security Surfaces")
             surfaces = []
             if profile.get("has_database"):
-                surfaces.append(f"🗄️ Database ({profile.get('db_type', 'unknown')})")
+                surfaces.append(f"Database ({profile.get('db_type', 'unknown')})")
             if profile.get("has_auth"):
-                surfaces.append("🔑 Auth Middleware / Sessions")
+                surfaces.append("Auth Middleware / Sessions")
             if profile.get("has_payment_api"):
-                surfaces.append(f"💳 Payment APIs ({', '.join(profile.get('payment_providers', []))})")
+                surfaces.append(f"Payment APIs ({', '.join(profile.get('payment_providers', []))})")
             if profile.get("has_file_uploads"):
-                surfaces.append("📁 File Upload System")
+                surfaces.append("File Upload System")
             if profile.get("has_external_http"):
-                surfaces.append("🌐 Outbound HTTP Requests")
+                surfaces.append("Outbound HTTP Requests")
             for surf in profile.get("notable_surfaces", []):
-                surfaces.append(f"⚙️ {surf}")
+                surfaces.append(f"{surf}")
                 
             if surfaces:
                 for s in surfaces:
@@ -468,7 +468,7 @@ if st.session_state.scan_completed:
             if pre_agents:
                 for agent in pre_agents:
                     desc = PREDEFINED_AGENT_DESCRIPTIONS.get(agent, "Specialized review")
-                    st.markdown(f"**🤖 {agent.capitalize()} Agent**")
+                    st.markdown(f"**{agent.capitalize()} Agent**")
                     st.caption(desc)
                     st.markdown("---")
             else:
@@ -479,7 +479,7 @@ if st.session_state.scan_completed:
             dyn_agents = plan.get("dynamic_agents", [])
             if dyn_agents:
                 for agent in dyn_agents:
-                    st.markdown(f"**✨ {agent.get('name', 'Dynamic Agent')}**")
+                    st.markdown(f"**{agent.get('name', 'Dynamic Agent')}**")
                     st.markdown(f"**Focus:** {agent.get('focus', 'N/A')}")
                     st.caption(f"**Trigger Reason:** {agent.get('trigger_reason', 'N/A')}")
                     with st.expander("Show System Prompt instructions"):
@@ -493,8 +493,7 @@ if st.session_state.scan_completed:
         verified_vulns = st.session_state.verified_findings
         
         if not verified_vulns:
-            st.balloons()
-            st.success("No code vulnerabilities were confirmed by the verification agent. Clean scan!")
+                        st.success("No code vulnerabilities were confirmed by the verification agent. Clean scan!")
         else:
             for idx, vuln in enumerate(verified_vulns):
                 severity = vuln.get("severity", "LOW").upper()
@@ -512,7 +511,7 @@ if st.session_state.scan_completed:
                     <h3 style="margin:0; font-size:1.25rem;">{vuln.get('title')}</h3>
                 </div>
                 <div style="color: #64748b; font-size: 0.9rem; margin-bottom: 10px;">
-                    📍 Affected File: <code>{vuln.get('file')}</code> (Lines {vuln.get('line_start')}-{vuln.get('line_end')}) | 🧩 CWE-{vuln.get('cwe_id')} | 🤖 Agent: <em>{vuln.get('source_agent')}</em>
+                    Affected File: <code>{vuln.get('file')}</code> (Lines {vuln.get('line_start')}-{vuln.get('line_end')}) | CWE-{vuln.get('cwe_id')} | Agent: <em>{vuln.get('source_agent')}</em>
                 </div>
                 """, unsafe_allow_html=True)
                 
@@ -520,7 +519,7 @@ if st.session_state.scan_completed:
                 
                 poc_code = vuln.get('poc_test_code', '')
                 if poc_code:
-                    with st.expander("🔑 View Proof-of-Concept (PoC) Regression Test", expanded=True):
+                    with st.expander("View Proof-of-Concept (PoC) Regression Test", expanded=True):
                         st.code(poc_code, language="python")
                 
                 st.divider()
@@ -537,9 +536,9 @@ if st.session_state.scan_completed:
         st.subheader("SECURITY_ASSIGNMENT_REPORT.md")
         st.markdown(st.session_state.final_report)
 else:
-    st.info("👈 Enter target workspace path and click **Start Security Audit** in the sidebar to begin.")
+    st.info("Enter target workspace path and click **Start Security Audit** in the sidebar to begin.")
     
-    st.write("### 🧭 Review Process Overview")
+    st.write("### Review Process Overview")
     st.markdown("""
     1. **Reconnaissance & Stack Profiling**: Scans files, determines technology stack, main entrances, and config properties.
     2. **Dynamic Planning**: LLM Agent examines details and configures optimized scanning experts (predefined & dynamic).

@@ -80,6 +80,8 @@ For each finding you receive:
 4. If it is a FALSE POSITIVE: explain exactly why the vulnerability is not exploitable.
 
 Return structured output with `verified` (boolean) and `poc_code` (the full test code string).
+
+CRITICAL INSTRUCTION: DO NOT attempt to write the PoC test or any other content to a file on disk using your tools. You must ONLY return the structured JSON output. DO NOT use any file writing or artifact creation tools.
 """
 
 REPORTING_INSTRUCTIONS = """

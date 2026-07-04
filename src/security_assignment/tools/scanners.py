@@ -6,11 +6,12 @@ import os
 
 
 async def run_semgrep_sast(workspace_path: str) -> str:
-    """
+    \"\"\"
     Executes a Semgrep SAST scan on the target workspace directory.
     Returns findings as a JSON string. Falls back to mock data if Semgrep is not installed.
-    """
-    if not shutil.which("semgrep"):
+    \"\"\"
+    exe_path = shutil.which("semgrep")
+    if not exe_path:
         # Fallback mock when semgrep is not installed
         return json.dumps({
             "results": [
@@ -28,7 +29,7 @@ async def run_semgrep_sast(workspace_path: str) -> str:
         })
     try:
         proc = await asyncio.create_subprocess_exec(
-            "semgrep", "scan", "--json", "--config=auto", workspace_path,
+            exe_path, "scan", "--json", "--config=auto", workspace_path,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
@@ -38,11 +39,12 @@ async def run_semgrep_sast(workspace_path: str) -> str:
 
 
 async def detect_secrets_gitleaks(workspace_path: str) -> str:
-    """
+    \"\"\"
     Scans the repository for hardcoded secrets and API keys using Gitleaks.
     Returns findings as a JSON string. Falls back to mock data if Gitleaks is not installed.
-    """
-    if not shutil.which("gitleaks"):
+    \"\"\"
+    exe_path = shutil.which("gitleaks")
+    if not exe_path:
         # Fallback mock when gitleaks is not installed
         return json.dumps([
             {
@@ -57,7 +59,7 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
         ])
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gitleaks", "detect", "--source", workspace_path,
+            exe_path, "detect", "--source", workspace_path,
             "--report-format", "json", "--no-git",
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
@@ -70,11 +72,12 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
 
 
 async def scan_dependencies_trivy(workspace_path: str) -> str:
-    """
+    \"\"\"
     Audits codebase package manifests using Trivy for known CVEs.
     Returns findings as a JSON string. Falls back to mock data if Trivy is not installed.
-    """
-    if not shutil.which("trivy"):
+    \"\"\"
+    exe_path = shutil.which("trivy")
+    if not exe_path:
         # Fallback mock when trivy is not installed
         return json.dumps({
             "Results": [
@@ -97,7 +100,7 @@ async def scan_dependencies_trivy(workspace_path: str) -> str:
         })
     try:
         proc = await asyncio.create_subprocess_exec(
-            "trivy", "fs", "--format", "json", workspace_path,
+            exe_path, "fs", "--format", "json", workspace_path,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
         stdout, _ = await proc.communicate()
