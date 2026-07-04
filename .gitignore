@@ -23,3 +23,9 @@ package-lock.json
 # Security Reports & Temp JSON Outputs
 *report.json
 *REPORT.md
+
+# Cloned target codebases & scratchpads
+dsvpwa/
+test_*.py
+*test_*.py
+

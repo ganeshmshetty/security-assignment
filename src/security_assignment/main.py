@@ -127,14 +127,36 @@ def build_agent_config(instructions: str, tools: list = [], schema=None) -> Loca
 # ─── Agent Runner Helpers ─────────────────────────────────────────────────────
 
 async def run_text(config: LocalAgentConfig, prompt: str) -> str:
-    async with Agent(config) as agent:
-        res = await agent.chat(prompt)
-        return await res.text()
+    for attempt in range(4):
+        try:
+            async with Agent(config) as agent:
+                res = await agent.chat(prompt)
+                return await res.text()
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "resource exhausted" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                wait_sec = (attempt + 1) * 4
+                print(f"    [!] Rate limited (HTTP 429) during agent text chat. Retrying in {wait_sec}s...")
+                await asyncio.sleep(wait_sec)
+            else:
+                raise e
+    raise Exception("Failed agent text chat after multiple retries due to rate limits.")
 
 async def run_structured(config: LocalAgentConfig, prompt: str) -> Any:
-    async with Agent(config) as agent:
-        res = await agent.chat(prompt)
-        return await res.structured_output()
+    for attempt in range(4):
+        try:
+            async with Agent(config) as agent:
+                res = await agent.chat(prompt)
+                return await res.structured_output()
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "resource exhausted" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                wait_sec = (attempt + 1) * 4
+                print(f"    [!] Rate limited (HTTP 429) during agent structured chat. Retrying in {wait_sec}s...")
+                await asyncio.sleep(wait_sec)
+            else:
+                raise e
+    raise Exception("Failed agent structured chat after multiple retries due to rate limits.")
 
 
 # ─── Individual Agent Coroutines ──────────────────────────────────────────────
@@ -199,10 +221,53 @@ async def run_verification_agent(finding: dict) -> Optional[dict]:
     return None
 
 
+def resolve_finding_file(abs_repo_path: str, file_path: str) -> str:
+    """
+    Attempts to resolve a finding's file path to a valid absolute path.
+    If the path is already absolute, returns it.
+    If it's relative, checks if it exists when joined with abs_repo_path.
+    If it doesn't exist, searches for a matching filename in the repository.
+    """
+    if not file_path:
+        return ""
+    
+    # Normalize separators for compatibility
+    file_path = file_path.replace("\\", "/").strip()
+    
+    # If absolute path and exists, return it
+    if os.path.isabs(file_path):
+        if os.path.exists(file_path):
+            return file_path
+        filename = os.path.basename(file_path)
+    else:
+        filename = os.path.basename(file_path)
+        # Try joining directly
+        joined = os.path.normpath(os.path.join(abs_repo_path, file_path))
+        if os.path.exists(joined):
+            return joined
+            
+        # Try joining with just the basename
+        joined_base = os.path.normpath(os.path.join(abs_repo_path, filename))
+        if os.path.exists(joined_base):
+            return joined_base
+
+    # Fallback: search target repo recursively for the filename
+    for root, _, files in os.walk(abs_repo_path):
+        if filename in files:
+            return os.path.normpath(os.path.join(root, filename))
+            
+    # best effort
+    return os.path.normpath(os.path.join(abs_repo_path, file_path))
+
+
 # ─── Main Pipeline ────────────────────────────────────────────────────────────
 
 async def run_security_pipeline(repo_path: str, force_agents: Optional[List[str]] = None):
     abs_repo_path = os.path.abspath(repo_path)
+    if not os.path.exists(abs_repo_path):
+        print(f"\nError: Target repository path '{abs_repo_path}' does not exist.")
+        return
+
     print(f"\n{'='*60}")
     print(f"  AI Security Review — {abs_repo_path}")
     print(f"{'='*60}\n")
@@ -285,12 +350,20 @@ not covered by the predefined registry, create new dynamic agent specs for them.
         findings = await run_dynamic_agent(spec_dict, abs_repo_path)
         return (f"dynamic:{name}", findings)
 
-    # Always-run agents + all selected/dynamic agents in parallel
+    # Concurrency control for Phase 3
+    agent_sem = asyncio.Semaphore(3)
+
+    async def run_agent_with_sem(coro):
+        async with agent_sem:
+            await asyncio.sleep(0.5)
+            return await coro
+
+    # Always-run agents + all selected/dynamic agents in parallel, throttled to 3 concurrent
     tasks = [
-        run_sast_agent(abs_repo_path),
-        run_dependency_agent(abs_repo_path),
-        *[dispatch_predefined(name) for name in selected_predefined],
-        *[dispatch_dynamic(spec) for spec in dynamic_specs],
+        run_agent_with_sem(run_sast_agent(abs_repo_path)),
+        run_agent_with_sem(run_dependency_agent(abs_repo_path)),
+        *[run_agent_with_sem(dispatch_predefined(name)) for name in selected_predefined],
+        *[run_agent_with_sem(dispatch_dynamic(spec)) for spec in dynamic_specs],
     ]
 
     results = await asyncio.gather(*tasks)
@@ -322,7 +395,27 @@ not covered by the predefined registry, create new dynamic agent specs for them.
 
     # ── Phase 4: Verification (parallel per finding) ─────────────────────────
     print(f"\n[4/5] Verifying {len(all_findings)} finding(s)...")
-    verification_results = await asyncio.gather(*[run_verification_agent(f) for f in all_findings])
+
+    # Self-healing absolute file path resolution before verification
+    for f in all_findings:
+        original_file = f.get("file", "")
+        resolved = resolve_finding_file(abs_repo_path, original_file)
+        if resolved:
+            f["file"] = resolved
+
+    # Concurrency control for Phase 4 (verification agents)
+    verify_sem = asyncio.Semaphore(2)
+
+    async def run_verify_with_sem(finding: dict):
+        async with verify_sem:
+            await asyncio.sleep(0.5)
+            try:
+                return await run_verification_agent(finding)
+            except Exception as e:
+                print(f"    [!] Skipped verification of finding '{finding.get('title')}' due to error: {e}")
+                return None
+
+    verification_results = await asyncio.gather(*[run_verify_with_sem(f) for f in all_findings])
     verified_findings = [f for f in verification_results if f is not None]
     print(f"    Verified: {len(verified_findings)} / {len(all_findings)} confirmed")
 
@@ -337,6 +430,7 @@ not covered by the predefined registry, create new dynamic agent specs for them.
         f"Verified Code Vulnerabilities:\n{json.dumps(verified_findings, indent=2)}\n\n"
         f"Dependency Audit Summary:\n{dep_text}"
     )
+
 
     output_path = os.path.join(abs_repo_path, "SECURITY_ASSIGNMENT_REPORT.md")
     with open(output_path, "w") as f:
