@@ -2,16 +2,32 @@ import asyncio
 import json
 import subprocess
 import shutil
+import os
+
+def resolve_file_path(workspace_path: str, relative_path: str) -> str:
+    """
+    Resolves the file path dynamically. If the workspace_path already ends with the 
+    parent folder of the relative_path, it prevents path doubling.
+    """
+    workspace_path = os.path.abspath(workspace_path)
+    parts = relative_path.strip("/").split("/")
+    first_folder = parts[0]
+    
+    if os.path.basename(workspace_path) == first_folder:
+        return os.path.join(workspace_path, *parts[1:])
+    return os.path.join(workspace_path, relative_path)
 
 async def run_semgrep_sast(workspace_path: str) -> str:
     """Executes a Semgrep scan on the target workspace directory."""
+    target_file = resolve_file_path(workspace_path, "sample_target/app.js")
+    
     if not shutil.which("semgrep"):
         # Fallback for demonstration if semgrep is not installed on the system
         return json.dumps({
             "results": [
                 {
                     "check_id": "javascript.express.security.injection.tainted-sql-string",
-                    "path": f"{workspace_path}/sample_target/app.js",
+                    "path": target_file,
                     "start": {"line": 18},
                     "extra": {
                         "message": "Detected string concatenation with SQL query. Potential SQL injection.",
@@ -33,6 +49,8 @@ async def run_semgrep_sast(workspace_path: str) -> str:
 
 async def detect_secrets_gitleaks(workspace_path: str) -> str:
     """Scans the repository for hardcoded secrets and api keys using GitLeaks."""
+    target_file = resolve_file_path(workspace_path, "sample_target/app.js")
+    
     if not shutil.which("gitleaks"):
         # Fallback mock for assignment demo
         return json.dumps([
@@ -40,7 +58,7 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
                 "Description": "Stripe Secret Key",
                 "StartLine": 29,
                 "EndLine": 29,
-                "File": f"{workspace_path}/sample_target/app.js",
+                "File": target_file,
                 "Match": "STRIPE_SECRET_KEY_PLACEHOLDER_NOT_A_REAL_KEY",
                 "Secret": "STRIPE_SECRET_KEY_PLACEHOLDER_NOT_A_REAL_KEY",
                 "RuleID": "stripe-secret-key"
@@ -59,12 +77,14 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
 
 async def scan_dependencies_trivy(workspace_path: str) -> str:
     """Audits codebase package files using Trivy."""
+    target_file = resolve_file_path(workspace_path, "sample_target/package.json")
+    
     if not shutil.which("trivy"):
         # Fallback mock for assignment demo
         return json.dumps({
             "Results": [
                 {
-                    "Target": f"{workspace_path}/sample_target/package.json",
+                    "Target": target_file,
                     "Class": "lang-pkgs",
                     "Type": "npm",
                     "Vulnerabilities": [

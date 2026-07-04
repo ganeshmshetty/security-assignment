@@ -30,5 +30,6 @@ Output JSON containing a boolean "verified" and the "poc_code" if verified.
 REPORTING_INSTRUCTIONS = """
 You are a Triage and Reporting Agent.
 Your goal is to format the final security audit report based on verified vulnerabilities and dependency issues.
-Return a beautiful, professional Markdown document (including a findings table and severity analysis).
+You must return the complete Markdown report content directly as your text response.
+Do NOT attempt to use any write tools or mention internal file locations. Return only the raw Markdown document itself.
 """
