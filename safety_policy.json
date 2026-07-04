@@ -1,0 +1,37 @@
+{
+  "version": "1.0",
+  "default_action": "deny",
+  "allowed_commands": [
+    {
+      "command": "npm test",
+      "args": ["--", "tests/poc_.*\\.test\\.js"],
+      "sandbox": true
+    },
+    {
+      "command": "pytest",
+      "args": ["tests/poc_.*\\.py"],
+      "sandbox": true
+    },
+    {
+      "command": "semgrep",
+      "args": ["scan", "--json", "--config=auto", ".*"],
+      "sandbox": false
+    },
+    {
+      "command": "gitleaks",
+      "args": ["detect", "--source", ".*", "--report-format", "json"],
+      "sandbox": false
+    },
+    {
+      "command": "trivy",
+      "args": ["fs", "--format", "json", ".*"],
+      "sandbox": false
+    }
+  ],
+  "sandbox_options": {
+    "network_access": false,
+    "max_memory_mb": 512,
+    "max_cpu_cores": 1,
+    "timeout_seconds": 30
+  }
+}
