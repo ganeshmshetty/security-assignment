@@ -107,6 +107,13 @@ set PYTHONPATH=src
 uv run python -m security_assignment.main .\sample_target
 ```
 
+### Run the Streamlit Dashboard (GUI)
+For a beautiful visual dashboard showing the analysis steps, metrics, and verified Proof-of-Concept exploits in real-time, run:
+
+```powershell
+uv run streamlit run app.py
+```
+
 ### Manual Agent Overrides
 If you want to bypass the dynamic Planner LLM and run specific predefined agents, use the `--agents` flag:
 

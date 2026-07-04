@@ -1,18 +1,14 @@
 {
-  "name": "sample-target-app",
+  "name": "sample-vulnerable-target",
   "version": "1.0.0",
-  "description": "Vulnerable app for SecurityAssignment demonstration",
+  "description": "Sample vulnerable Node.js Express & SQLite application to test security scanner",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node app.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "sqlite3": "^5.1.6"
-  },
-  "devDependencies": {
-    "jest": "^30.4.2",
-    "supertest": "^7.2.2"
+    "express": "4.16.0",
+    "sqlite3": "^5.1.7",
+    "lodash": "4.17.15"
   }
 }
