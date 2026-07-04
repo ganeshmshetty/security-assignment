@@ -6,10 +6,10 @@ import os
 
 
 async def run_semgrep_sast(workspace_path: str) -> str:
-    \"\"\"
+    """
     Executes a Semgrep SAST scan on the target workspace directory.
     Returns findings as a JSON string. Falls back to mock data if Semgrep is not installed.
-    \"\"\"
+    """
     exe_path = shutil.which("semgrep")
     if not exe_path:
         # Fallback mock when semgrep is not installed
@@ -39,10 +39,10 @@ async def run_semgrep_sast(workspace_path: str) -> str:
 
 
 async def detect_secrets_gitleaks(workspace_path: str) -> str:
-    \"\"\"
+    """
     Scans the repository for hardcoded secrets and API keys using Gitleaks.
     Returns findings as a JSON string. Falls back to mock data if Gitleaks is not installed.
-    \"\"\"
+    """
     exe_path = shutil.which("gitleaks")
     if not exe_path:
         # Fallback mock when gitleaks is not installed
@@ -72,10 +72,10 @@ async def detect_secrets_gitleaks(workspace_path: str) -> str:
 
 
 async def scan_dependencies_trivy(workspace_path: str) -> str:
-    \"\"\"
+    """
     Audits codebase package manifests using Trivy for known CVEs.
     Returns findings as a JSON string. Falls back to mock data if Trivy is not installed.
-    \"\"\"
+    """
     exe_path = shutil.which("trivy")
     if not exe_path:
         # Fallback mock when trivy is not installed
