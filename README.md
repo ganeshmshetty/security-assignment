@@ -4,47 +4,58 @@ A dynamic multi-agent security scanner built on the `google-antigravity` SDK. Th
 
 ---
 
-## 🚀 Setup Workflow
+## 🚀 Setup Workflow (Windows)
 
-Follow these steps to set up the system on a new machine.
+Follow these steps to set up the system on a new Windows computer.
 
 ### 1. Install Prerequisites
 
-Ensure you have the following package managers and tools installed:
+Open **PowerShell** (as Administrator) and run the following command to install the required tools using `winget` (Windows Package Manager, built into Windows 10 & 11) and PowerShell scripts:
 
-- **Homebrew** (for macOS CLI tools):
-  ```bash
-  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-  ```
-- **uv** (Modern, fast Python package and environment manager):
-  ```bash
-  curl -LsSf https://astral.sh/uv/install.sh | sh
+- **Git** (Version control):
+  ```powershell
+  winget install --id Git.Git -e --source winget
   ```
 - **Node.js & npm** (For testing and running the Node.js sample target):
-  ```bash
-  brew install node
+  ```powershell
+  winget install --id OpenJS.NodeJS -e --source winget
   ```
+- **uv** (Modern, fast Python package and runtime manager):
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+  *(After installing, restart your PowerShell window to ensure the `uv` command is available in your PATH).*
 
 ---
 
 ### 2. Install Security Scanners (Optional but Recommended)
 
-The pipeline integrates with standard open-source CLI tools to perform scans. 
+The pipeline integrates with open-source security binaries to perform scans. You can install them on Windows as follows:
 
-```bash
-brew install semgrep trivy gitleaks
-```
+- **Gitleaks** (Secrets detection):
+  ```powershell
+  winget install --id Gitleaks.Gitleaks -e --source winget
+  ```
+- **Trivy** (Dependency audit):
+  ```powershell
+  winget install --id aquasecurity.trivy -e --source winget
+  ```
+- **Semgrep** (Static analysis):
+  Semgrep can be installed via Python's package manager:
+  ```powershell
+  pip install semgrep
+  ```
 
 > [!NOTE]
-> **Mock Fallbacks:** If these tools are not installed or available in your `PATH`, the codebase automatically falls back to simulated scanner results for the sample target so you can test the pipeline's agent flows immediately.
+> **Mock Fallbacks:** If these tools are not installed or available in your environment, the pipeline automatically falls back to simulated scanner results for the sample target so you can test the pipeline's agent flows immediately.
 
 ---
 
 ### 3. Clone and Setup Project
 
-Clone the repository and sync the dependencies. `uv` will automatically download and manage the required Python version based on the project configuration.
+Clone the repository and sync the dependencies. `uv` will automatically download and manage the correct Python runtime on Windows:
 
-```bash
+```powershell
 git clone https://github.com/ganeshmshetty/security-assignment.git
 cd security-assignment
 uv sync
@@ -56,24 +67,25 @@ uv sync
 
 The `google-antigravity` SDK uses Google Vertex AI (Gemini 3.5 Flash) under the hood. You must authenticate using Application Default Credentials (ADC).
 
-1. Install the Google Cloud CLI (if not already installed):
-   ```bash
-   brew install --cask google-cloud-sdk
+1. Install the Google Cloud CLI for Windows:
+   ```powershell
+   winget install --id Google.CloudSDK -e --source winget
    ```
+   *(Or download the standalone installer from the GCP docs and restart your shell).*
 2. Authenticate your user account:
-   ```bash
+   ```powershell
    gcloud auth login
    ```
 3. Generate the application default credentials file:
-   ```bash
+   ```powershell
    gcloud auth application-default login
    ```
 4. Set the active project:
-   ```bash
+   ```powershell
    gcloud config set project causal-hour-494002-e9
    ```
 5. Set the quota project for billing:
-   ```bash
+   ```powershell
    gcloud auth application-default set-quota-project causal-hour-494002-e9
    ```
 
@@ -81,33 +93,41 @@ The `google-antigravity` SDK uses Google Vertex AI (Gemini 3.5 Flash) under the 
 
 ## 🏃 Running the Security Reviewer
 
-### Run the Pipeline
-Run an automated security audit on any codebase target (e.g. the included `./sample_target`):
+### Run the Pipeline (PowerShell)
+To run the automated security reviewer on the sample target, set the `PYTHONPATH` environment variable and run the main entry point:
 
-```bash
-env PYTHONPATH=src uv run python -m security_assignment.main ./sample_target
+```powershell
+$env:PYTHONPATH="src"
+uv run python -m security_assignment.main .\sample_target
+```
+
+If you are using **Windows Command Prompt (cmd)**:
+```cmd
+set PYTHONPATH=src
+uv run python -m security_assignment.main .\sample_target
 ```
 
 ### Manual Agent Overrides
 If you want to bypass the dynamic Planner LLM and run specific predefined agents, use the `--agents` flag:
 
-```bash
-env PYTHONPATH=src uv run python -m security_assignment.main ./sample_target --agents sast,auth,dependency
+```powershell
+$env:PYTHONPATH="src"
+uv run python -m security_assignment.main .\sample_target --agents sast,auth,dependency
 ```
 
 ---
 
 ## 🛠 Running the Sample Target
 
-The `sample_target/` folder contains a intentionally vulnerable Node.js Express application (with SQL injection flaws and simulated hardcoded credentials) used to test the scanner.
+The `sample_target/` folder contains a Node.js Express application used to test the scanner.
 
-1. Navigate to the folder and install dependencies:
-   ```bash
+1. Navigate to the folder and install Node packages:
+   ```powershell
    cd sample_target
    npm install
    ```
 2. Start the application:
-   ```bash
+   ```powershell
    npm start
    ```
 
@@ -116,7 +136,7 @@ The `sample_target/` folder contains a intentionally vulnerable Node.js Express 
 ## 📂 Project Structure & Architecture
 
 ```
-├── README.md                      # Setup and usage guide
+├── README.md                      # Windows setup and usage guide
 ├── pyproject.toml                 # uv package definition
 ├── safety_policy.json             # Execution safety boundaries mapping
 ├── sample_target/                 # Vulnerable target codebase (Express + SQLite)
@@ -135,4 +155,3 @@ The `sample_target/` folder contains a intentionally vulnerable Node.js Express 
 3. **Parallel Execution**: Dispatches Core (SAST, Dependency) and Specialized agents concurrently.
 4. **Verification**: Validates findings to discard false positives.
 5. **Reporting**: Compiles everything into `SECURITY_ASSIGNMENT_REPORT.md` inside the target directory.
-
