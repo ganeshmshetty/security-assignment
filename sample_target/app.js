@@ -31,8 +31,10 @@ app.get('/api/users/search', (req, res) => {
 // VULNERABILITY 2: Hardcoded API Key (GitLeaks should find this)
 const STRIPE_SECRET_KEY = "STRIPE_SECRET_KEY_PLACEHOLDER_NOT_A_REAL_KEY";
 
-app.listen(port, () => {
-  console.log(`Vulnerable sample app listening on port ${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Vulnerable sample app listening on port ${port}`);
+  });
+}
 
 module.exports = app;
